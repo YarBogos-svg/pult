@@ -92,8 +92,8 @@ class Desk(tk.Tk):
     def _fetch(self, path):
         stamp = int(time.time())
         request = urllib.request.Request(
-            f"{UPDATE_BASE}/{path}?t={stamp}",
-            headers={"User-Agent": "pult", "Cache-Control": "no-cache", "Pragma": "no-cache"},
+            f"https://api.github.com/repos/YarBogos-svg/pult/contents/{path}?t={stamp}",
+            headers={"User-Agent": "pult", "Accept": "application/vnd.github.raw", "Cache-Control": "no-cache"},
         )
         with urllib.request.urlopen(request, timeout=15) as response:
             return response.read()
