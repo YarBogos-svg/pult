@@ -73,8 +73,8 @@ class Desk(tk.Tk):
         self.events = queue.Queue()
         self.limited = tk.BooleanVar(value=False)
         self.pages = tk.StringVar(value="10")
-        self.login = tk.StringVar(value=self._saved_login())
-        self.password = tk.StringVar()
+        self.logins = {job_id: tk.StringVar(value=self._saved_login(job_id)) for job_id in JOBS}
+        self.passwords = {job_id: tk.StringVar() for job_id in JOBS}
         self.jobs = {}
         for job_id, spec in JOBS.items():
             self.jobs[job_id] = {
@@ -152,10 +152,13 @@ class Desk(tk.Tk):
         subprocess.Popen([sys.executable, str(ROOT / "pult_gui.pyw")], cwd=str(ROOT))
         self.destroy()
 
-    def _saved_login(self):
-        path = ROOT / "login.txt"
+    def _saved_login(self, job_id):
+        path = ROOT / f"login_{job_id}.txt"
         if path.is_file():
             return path.read_text(encoding="utf-8").strip()
+        legacy = ROOT / "login.txt"
+        if job_id == "gng" and legacy.is_file():
+            return legacy.read_text(encoding="utf-8").strip()
         return ""
 
     def _build(self):
@@ -246,6 +249,8 @@ class Desk(tk.Tk):
             )
             file_btn.pack(side="right")
             self.file_btns[job_id] = file_btn
+            self._field(block, self.logins[job_id], "Логин", bg=RAISED)
+            self._field(block, self.passwords[job_id], "Пароль", show="•", bg=RAISED)
 
         tk.Frame(card, bg=LINE, height=1).pack(fill="x", pady=(6, 10))
         tk.Label(card, text="Объём", bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w")
@@ -297,11 +302,7 @@ class Desk(tk.Tk):
         self.rows_label = self.row_labels["gng"]
         self.file_btn = self.file_btns["gng"]
 
-        tk.Label(card, text="Вход", bg=SURFACE, fg=FG, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
-        tk.Label(card, text="Свой для каждого сайта. Заполни перед запуском.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=280, justify="left").pack(anchor="w")
-        self._field(card, self.login, "Логин")
-        self._field(card, self.password, "Пароль", show="•")
-        self.error = tk.Label(card, text="", bg=SURFACE, fg=FG, font=("Segoe UI", 9), wraplength=260, justify="left")
+        self.error = tk.Label(card, text="", bg=SURFACE, fg=FG, font=("Segoe UI", 9), wraplength=280, justify="left")
         self.error.pack(anchor="w", pady=(8, 0))
 
         log_wrap = tk.Frame(body, bg=BG, highlightbackground=LINE, highlightthickness=1)
@@ -328,8 +329,8 @@ class Desk(tk.Tk):
         self.log.configure(state="disabled")
         self._paint_mode()
 
-    def _field(self, parent, variable, caption, show=None):
-        tk.Label(parent, text=caption, bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(8, 0))
+    def _field(self, parent, variable, caption, show=None, bg=SURFACE):
+        tk.Label(parent, text=caption, bg=bg, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(8, 0))
         entry = tk.Entry(
             parent, textvariable=variable, bg=BG, fg=FG, insertbackground=FG, relief="flat", font=("Segoe UI", 11), show=show
         )
@@ -520,8 +521,8 @@ class Desk(tk.Tk):
             if pages < 1 or pages > 5000:
                 self.error.configure(text="Лимит — от 1 до 5000.")
                 return
-        login = self.login.get().strip()
-        (ROOT / "login.txt").write_text(login, encoding="utf-8")
+        login = self.logins[job_id].get().strip()
+        (ROOT / f"login_{job_id}.txt").write_text(login, encoding="utf-8")
         spec["dir"].mkdir(parents=True, exist_ok=True)
         out_file = spec["dir"] / spec["file"]
         self.jobs[job_id]["out"] = out_file
@@ -529,10 +530,10 @@ class Desk(tk.Tk):
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
-        env["GNG_LOGIN"] = login
-        env["GNG_PASSWORD"] = self.password.get()
-        env["PARTS_LOGIN"] = login
-        env["PARTS_PASSWORD"] = self.password.get()
+        env["GNG_LOGIN"] = self.logins["gng"].get().strip()
+        env["GNG_PASSWORD"] = self.passwords["gng"].get()
+        env["PARTS_LOGIN"] = self.logins["parts"].get().strip()
+        env["PARTS_PASSWORD"] = self.passwords["parts"].get()
         env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
