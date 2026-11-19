@@ -309,7 +309,22 @@ class Desk(tk.Tk):
         log_wrap.grid(row=0, column=1, sticky="nsew")
         bar = tk.Frame(log_wrap, bg=BG)
         bar.pack(fill="x")
-        tk.Label(bar, text="Журнал", bg=BG, fg=FG, font=("Segoe UI", 11, "bold")).pack(side="left", padx=12, pady=10)
+        self.log_tabs = {}
+        self.logs = {}
+        tabs = tk.Frame(bar, bg=BG)
+        tabs.pack(side="left", padx=8, pady=8)
+        for job_id, spec in JOBS.items():
+            tab = tk.Button(
+                tabs,
+                text=spec["label"],
+                command=lambda key=job_id: self._show_log(key),
+                relief="flat",
+                font=("Segoe UI", 11, "bold"),
+                padx=14,
+                pady=6,
+            )
+            tab.pack(side="left", padx=(0, 6))
+            self.log_tabs[job_id] = tab
         tk.Button(
             bar,
             text="Лог ошибок",
@@ -319,14 +334,19 @@ class Desk(tk.Tk):
             relief="flat",
             font=("Segoe UI", 10),
         ).pack(side="right", padx=12, pady=8)
-        self.log = tk.Text(
-            log_wrap, bg=BG, fg=MUTED, insertbackground=FG, relief="flat", font=("Consolas", 10), wrap="word", padx=12, pady=8
-        )
-        self.log.tag_configure("err", foreground="#ffb4a2")
-        self.log.tag_configure("pause", foreground="#c6e05a")
-        self.log.pack(fill="both", expand=True)
-        self.log.insert("1.0", "Нажми G&G или PartsAgro — здесь пойдут страницы, строки и ошибки.")
-        self.log.configure(state="disabled")
+        self.log_host = tk.Frame(log_wrap, bg=BG)
+        self.log_host.pack(fill="both", expand=True)
+        for job_id, spec in JOBS.items():
+            log = tk.Text(
+                self.log_host, bg=BG, fg=MUTED, insertbackground=FG, relief="flat", font=("Consolas", 10), wrap="word", padx=12, pady=8
+            )
+            log.tag_configure("err", foreground="#ffb4a2")
+            log.tag_configure("pause", foreground="#c6e05a")
+            log.insert("1.0", f"Журнал {spec['label']}. Запусти его — здесь будут только его строки.")
+            log.configure(state="disabled")
+            self.logs[job_id] = log
+        self.active_log = "gng"
+        self._show_log("gng")
         self._paint_mode()
 
     def _field(self, parent, variable, caption, show=None, bg=SURFACE):
@@ -439,20 +459,34 @@ class Desk(tk.Tk):
             self._show_pause()
         self._paint_mode()
 
+    def _show_log(self, job_id):
+        self.active_log = job_id
+        for key, log in self.logs.items():
+            log.pack_forget()
+        self.logs[job_id].pack(fill="both", expand=True)
+        for key, tab in self.log_tabs.items():
+            if key == job_id:
+                tab.configure(bg=ACCENT, fg=INK, activebackground=ACCENT, activeforeground=INK)
+            else:
+                tab.configure(bg=RAISED, fg=FG, activebackground=RAISED, activeforeground=FG)
+
     def _append(self, line, job_id=None):
-        self.log.configure(state="normal")
-        current = self.log.get("1.0", "end").strip()
-        if current.startswith("Нажми "):
-            self.log.delete("1.0", "end")
+        target = job_id or self.active_log
+        log = self.logs[target]
+        log.configure(state="normal")
+        current = log.get("1.0", "end").strip()
+        if current.startswith("Журнал "):
+            log.delete("1.0", "end")
         tag = ""
         if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
             tag = "err"
         elif line.startswith("ПАУЗА"):
             tag = "pause"
-        prefix = f"[{JOBS[job_id]['label']}] " if job_id else ""
-        self.log.insert("end", prefix + line + "\n", tag)
-        self.log.see("end")
-        self.log.configure(state="disabled")
+        log.insert("end", line + "\n", tag)
+        log.see("end")
+        log.configure(state="disabled")
+        if job_id and job_id != self.active_log and self.jobs[job_id]["status"] == "running":
+            self._show_log(job_id)
         if line.startswith("ПАУЗА"):
             self.pause_btn.pack_forget()
             if not self.resume.winfo_ismapped():
@@ -606,12 +640,12 @@ class Desk(tk.Tk):
         self.after(200, self._pump)
 
     def _open_log(self):
-        for spec in JOBS.values():
-            path = spec["dir"] / spec["file"].replace(".xlsx", ".log")
-            if path.is_file():
-                self._open_path(path)
-                return
-        self.error.configure(text="Файла ошибок ещё нет — он появится после запуска.")
+        spec = JOBS[self.active_log]
+        path = spec["dir"] / spec["file"].replace(".xlsx", ".log")
+        if path.is_file():
+            self._open_path(path)
+            return
+        self.error.configure(text=f"Лога {spec['label']} ещё нет — он появится после запуска.")
 
     def _open_job(self, job_id):
         path = self.jobs[job_id]["out"]
