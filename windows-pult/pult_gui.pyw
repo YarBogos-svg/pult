@@ -325,8 +325,19 @@ class Desk(tk.Tk):
         bar.pack(fill="x")
         self.log_tabs = {}
         self.logs = {}
+        self.log_cells = {}
         tabs = tk.Frame(bar, bg=BG)
         tabs.pack(side="left", padx=8, pady=8)
+        self.overview_tab = tk.Button(
+            tabs,
+            text="Общий вид",
+            command=lambda: self._show_log("all"),
+            relief="flat",
+            font=("Segoe UI", 11, "bold"),
+            padx=14,
+            pady=6,
+        )
+        self.overview_tab.pack(side="left", padx=(0, 6))
         for job_id, spec in JOBS.items():
             tab = tk.Button(
                 tabs,
@@ -350,17 +361,25 @@ class Desk(tk.Tk):
         ).pack(side="right", padx=12, pady=8)
         self.log_host = tk.Frame(log_wrap, bg=BG)
         self.log_host.pack(fill="both", expand=True)
+        self.log_host.columnconfigure(0, weight=1)
+        self.log_host.columnconfigure(1, weight=1)
+        self.log_host.rowconfigure(0, weight=1)
+        self.log_host.rowconfigure(1, weight=1)
         for job_id, spec in JOBS.items():
+            cell = tk.Frame(self.log_host, bg=BG, highlightbackground=LINE, highlightthickness=1)
+            tk.Label(cell, text=spec["label"], bg=BG, fg=FG, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
             log = tk.Text(
-                self.log_host, bg=BG, fg=MUTED, insertbackground=FG, relief="flat", font=("Consolas", 10), wrap="word", padx=12, pady=8
+                cell, bg=BG, fg=MUTED, insertbackground=FG, relief="flat", font=("Consolas", 9), wrap="word", padx=10, pady=6
             )
             log.tag_configure("err", foreground="#ffb4a2")
             log.tag_configure("pause", foreground="#c6e05a")
             log.insert("1.0", f"Журнал {spec['label']}. Запусти его — здесь будут только его строки.")
             log.configure(state="disabled")
+            log.pack(fill="both", expand=True)
             self.logs[job_id] = log
-        self.active_log = "gng"
-        self._show_log("gng")
+            self.log_cells[job_id] = cell
+        self.active_log = "all"
+        self._show_log("all")
         self._paint_mode()
 
     def _field(self, parent, variable, caption, show=None, bg=SURFACE):
@@ -475,32 +494,45 @@ class Desk(tk.Tk):
 
     def _show_log(self, job_id):
         self.active_log = job_id
-        for key, log in self.logs.items():
-            log.pack_forget()
-        self.logs[job_id].pack(fill="both", expand=True)
+        for cell in self.log_cells.values():
+            cell.pack_forget()
+            cell.grid_forget()
+        if job_id == "all":
+            for index, key in enumerate(JOBS):
+                self.log_cells[key].grid(row=index // 2, column=index % 2, sticky="nsew", padx=4, pady=4)
+        else:
+            self.log_cells[job_id].pack(fill="both", expand=True)
+        self.overview_tab.configure(
+            bg=ACCENT if job_id == "all" else RAISED,
+            fg=INK if job_id == "all" else FG,
+            activebackground=ACCENT if job_id == "all" else RAISED,
+            activeforeground=INK if job_id == "all" else FG,
+        )
         for key, tab in self.log_tabs.items():
-            if key == job_id:
-                tab.configure(bg=ACCENT, fg=INK, activebackground=ACCENT, activeforeground=INK)
-            else:
-                tab.configure(bg=RAISED, fg=FG, activebackground=RAISED, activeforeground=FG)
+            active = key == job_id
+            tab.configure(
+                bg=ACCENT if active else RAISED,
+                fg=INK if active else FG,
+                activebackground=ACCENT if active else RAISED,
+                activeforeground=INK if active else FG,
+            )
 
     def _append(self, line, job_id=None):
-        target = job_id or self.active_log
-        log = self.logs[target]
-        log.configure(state="normal")
-        current = log.get("1.0", "end").strip()
-        if current.startswith("Журнал "):
-            log.delete("1.0", "end")
-        tag = ""
-        if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
-            tag = "err"
-        elif line.startswith("ПАУЗА"):
-            tag = "pause"
-        log.insert("end", line + "\n", tag)
-        log.see("end")
-        log.configure(state="disabled")
-        if job_id and job_id != self.active_log and self.jobs[job_id]["status"] == "running":
-            self._show_log(job_id)
+        targets = [job_id] if job_id else list(self.logs)
+        for target in targets:
+            log = self.logs[target]
+            log.configure(state="normal")
+            current = log.get("1.0", "end").strip()
+            if current.startswith("Журнал "):
+                log.delete("1.0", "end")
+            tag = ""
+            if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
+                tag = "err"
+            elif line.startswith("ПАУЗА"):
+                tag = "pause"
+            log.insert("end", line + "\n", tag)
+            log.see("end")
+            log.configure(state="disabled")
         if line.startswith("ПАУЗА"):
             self.pause_btn.pack_forget()
             if not self.resume.winfo_ismapped():
@@ -656,12 +688,14 @@ class Desk(tk.Tk):
         self.after(200, self._pump)
 
     def _open_log(self):
-        spec = JOBS[self.active_log]
-        path = spec["dir"] / spec["file"].replace(".xlsx", ".log")
-        if path.is_file():
-            self._open_path(path)
-            return
-        self.error.configure(text=f"Лога {spec['label']} ещё нет — он появится после запуска.")
+        keys = list(JOBS) if self.active_log == "all" else [self.active_log]
+        for key in keys:
+            spec = JOBS[key]
+            path = spec["dir"] / spec["file"].replace(".xlsx", ".log")
+            if path.is_file():
+                self._open_path(path)
+                return
+        self.error.configure(text="Лога ещё нет — он появится после запуска.")
 
     def _open_job(self, job_id):
         path = self.jobs[job_id]["out"]
