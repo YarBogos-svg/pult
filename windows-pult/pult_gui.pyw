@@ -6,6 +6,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import urllib.request
 from pathlib import Path
@@ -89,9 +90,10 @@ class Desk(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._close)
 
     def _fetch(self, path):
+        stamp = int(time.time())
         request = urllib.request.Request(
-            f"{UPDATE_BASE}/{path}",
-            headers={"User-Agent": "pult", "Cache-Control": "no-cache"},
+            f"{UPDATE_BASE}/{path}?t={stamp}",
+            headers={"User-Agent": "pult", "Cache-Control": "no-cache", "Pragma": "no-cache"},
         )
         with urllib.request.urlopen(request, timeout=15) as response:
             return response.read()
