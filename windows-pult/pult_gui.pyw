@@ -17,7 +17,7 @@ RESULTS = ROOT / "results"
 ICON = ROOT / "pult.ico"
 VERSION_PATH = ROOT / "version.txt"
 UPDATE_BASE = "https://raw.githubusercontent.com/YarBogos-svg/pult/main"
-UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "requirements.txt")
+UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "requirements.txt")
 JOBS = {
     "gng": {
         "label": "G&G",
@@ -32,6 +32,13 @@ JOBS = {
         "script": ROOT / "parsers" / "partsagro.py",
         "dir": RESULTS / "partsagro",
         "file": "partsagro.xlsx",
+    },
+    "pm": {
+        "label": "PartsManager",
+        "site": "ALLBEST и PM PRO · partsmanager.ru",
+        "script": ROOT / "parsers" / "partsmanager.py",
+        "dir": RESULTS / "partsmanager",
+        "file": "partsmanager.xlsx",
     },
 }
 
@@ -564,6 +571,8 @@ class Desk(tk.Tk):
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        env["PULT_LOGIN"] = login
+        env["PULT_PASSWORD"] = self.passwords[job_id].get()
         env["GNG_LOGIN"] = self.logins["gng"].get().strip()
         env["GNG_PASSWORD"] = self.passwords["gng"].get()
         env["PARTS_LOGIN"] = self.logins["parts"].get().strip()
