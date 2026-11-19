@@ -89,21 +89,24 @@ class Desk(tk.Tk):
         self.after(1200, self._check_update)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
-    def _fetch(self, path):
-        stamp = datetime.now().strftime("%Y%m%d%H%M")
-        urls = (
-            f"https://raw.githubusercontent.com/YarBogos-svg/pult/main/{path}?t={stamp}",
-            f"https://cdn.jsdelivr.net/gh/YarBogos-svg/pult@main/{path}",
+    def _latest_sha(self):
+        request = urllib.request.Request(
+            "https://github.com/YarBogos-svg/pult.git/info/refs?service=git-upload-pack",
+            headers={"User-Agent": "pult"},
         )
-        last = None
-        for url in urls:
-            try:
-                request = urllib.request.Request(url, headers={"User-Agent": "pult", "Cache-Control": "no-cache"})
-                with urllib.request.urlopen(request, timeout=15) as response:
-                    return response.read()
-            except Exception as error:
-                last = error
-        raise last
+        with urllib.request.urlopen(request, timeout=15) as response:
+            text = response.read().decode("utf-8", "replace")
+        for line in text.splitlines():
+            if "refs/heads/main" in line:
+                token = line.split()[0]
+                return token[-40:]
+        raise RuntimeError("не нашёл свежий коммит")
+
+    def _fetch(self, path, sha):
+        url = f"https://raw.githubusercontent.com/YarBogos-svg/pult/{sha}/{path}"
+        request = urllib.request.Request(url, headers={"User-Agent": "pult"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.read()
 
     def _local_version(self):
         if VERSION_PATH.is_file():
@@ -119,7 +122,8 @@ class Desk(tk.Tk):
 
     def _update_worker(self):
         try:
-            remote = self._fetch("version.txt").decode("utf-8").strip()
+            sha = self._latest_sha()
+            remote = self._fetch("version.txt", sha).decode("utf-8").strip()
         except Exception as error:
             text = str(error)
             if "rate limit" in text or "403" in text:
@@ -133,7 +137,7 @@ class Desk(tk.Tk):
             return
         try:
             for name in UPDATE_FILES:
-                data = self._fetch(f"windows-pult/{name}")
+                data = self._fetch(f"windows-pult/{name}", sha)
                 target = ROOT / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
