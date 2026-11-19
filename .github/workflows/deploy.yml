@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack Windows zip
+        run: |
+          rm -rf dist
+          mkdir -p dist/Pult/windows-pult
+          cp "ЗАПУСК ПУЛЬТА.bat" dist/Pult/
+          cp zapusk.ps1 dist/Pult/
+          cp -r windows-pult/. dist/Pult/windows-pult/
+          find dist -type d -name __pycache__ -exec rm -rf {} +
+          (cd dist && zip -r ../Pult-Windows.zip Pult)
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < version.txt)"
+          TAG="v${VERSION}"
+          NOTES="Автосборка из main. Пульт подтянет эти файлы сам."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Pult-Windows.zip --clobber
+            gh release edit "$TAG" --title "Пульт ${VERSION}" --notes "$NOTES" --latest
+          else
+            gh release create "$TAG" Pult-Windows.zip \
+              --title "Пульт ${VERSION}" \
+              --notes "$NOTES" \
+              --latest
+          fi
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
