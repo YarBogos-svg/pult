@@ -76,8 +76,20 @@ async def page_text(page) -> str:
 
 
 async def is_challenge(page) -> bool:
-    html = await page_text(page)
-    return any(marker in html for marker in ("captcha", "recaptcha", "капча", "я не робот", "security check"))
+    try:
+        visible = await page.evaluate(
+            """() => {
+                const selectors = ["#captcha", ".captcha", "img[src*='captcha']", "input[name*='captcha']", "iframe[src*='recaptcha']", "iframe[src*='hcaptcha']"];
+                return selectors.some((selector) => Array.from(document.querySelectorAll(selector)).some((node) => {
+                    const style = getComputedStyle(node);
+                    const box = node.getBoundingClientRect();
+                    return style.display !== "none" && style.visibility !== "hidden" && box.width > 20 && box.height > 20;
+                }));
+            }"""
+        )
+    except Exception:
+        visible = False
+    return bool(visible)
 
 
 async def wait_user(page, stop, reason: str) -> bool:

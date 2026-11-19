@@ -86,10 +86,13 @@ class Desk(tk.Tk):
         self.proc = None
         self.out_file = None
         self.events = queue.Queue()
-        self.limited = tk.BooleanVar(value=False)
-        self.pages = tk.StringVar(value="10")
-        self.logins = {job_id: tk.StringVar(value=self._saved_login(job_id)) for job_id in JOBS}
-        self.passwords = {job_id: tk.StringVar() for job_id in JOBS}
+        self.limited = {job_id: tk.BooleanVar(value=False) for job_id in JOBS}
+        self.pages = {job_id: tk.StringVar(value="10") for job_id in JOBS}
+        self.logins = {job_id: tk.StringVar(value=self._saved(f"login_{job_id}.txt")) for job_id in JOBS}
+        self.passwords = {job_id: tk.StringVar(value=self._saved(f"password_{job_id}.txt")) for job_id in JOBS}
+        for job_id in JOBS:
+            self.logins[job_id].trace_add("write", lambda *_args, key=job_id: self._save(f"login_{key}.txt", self.logins[key].get()))
+            self.passwords[job_id].trace_add("write", lambda *_args, key=job_id: self._save(f"password_{key}.txt", self.passwords[key].get()))
         self.jobs = {}
         for job_id, spec in JOBS.items():
             self.jobs[job_id] = {
@@ -168,14 +171,16 @@ class Desk(tk.Tk):
         subprocess.Popen([sys.executable, str(ROOT / "pult_gui.pyw")], cwd=str(ROOT))
         self.destroy()
 
-    def _saved_login(self, job_id):
-        path = ROOT / f"login_{job_id}.txt"
+    def _saved(self, name):
+        path = ROOT / name
         if path.is_file():
             return path.read_text(encoding="utf-8").strip()
-        legacy = ROOT / "login.txt"
-        if job_id == "gng" and legacy.is_file():
-            return legacy.read_text(encoding="utf-8").strip()
+        if name == "login_gng.txt" and (ROOT / "login.txt").is_file():
+            return (ROOT / "login.txt").read_text(encoding="utf-8").strip()
         return ""
+
+    def _save(self, name, value):
+        (ROOT / name).write_text(value.strip(), encoding="utf-8")
 
     def _build(self):
         shell = tk.Frame(self, bg=BG)
@@ -241,6 +246,11 @@ class Desk(tk.Tk):
         self.actions = {}
         self.row_labels = {}
         self.file_btns = {}
+        self.pause_btns = {}
+        self.resume_btns = {}
+        self.limit_boxes = {}
+        self.all_btns = {}
+        self.limit_btns = {}
         tk.Label(card, text="Парсеры", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 8))
         for job_id, spec in JOBS.items():
             block = tk.Frame(card, bg=RAISED, padx=10, pady=10)
@@ -267,56 +277,27 @@ class Desk(tk.Tk):
             self.file_btns[job_id] = file_btn
             self._field(block, self.logins[job_id], "Логин", bg=RAISED)
             self._field(block, self.passwords[job_id], "Пароль", show="•", bg=RAISED)
-
-        tk.Frame(card, bg=LINE, height=1).pack(fill="x", pady=(6, 10))
-        tk.Label(card, text="Объём", bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w")
-        modes = tk.Frame(card, bg=SURFACE)
-        modes.pack(fill="x", pady=(4, 8))
-        self.all_btn = tk.Button(modes, text="Весь каталог", command=lambda: self._mode(False))
-        self.limit_btn = tk.Button(modes, text="Лимит", command=lambda: self._mode(True))
-        self.all_btn.pack(side="left", expand=True, fill="x", padx=(0, 4))
-        self.limit_btn.pack(side="left", expand=True, fill="x")
-
-        self.limit_box = tk.Frame(card, bg=SURFACE)
-        self.limit_entry = tk.Entry(
-            self.limit_box, textvariable=self.pages, bg=BG, fg=FG, insertbackground=FG, relief="flat", font=("Consolas", 12)
-        )
-        self.limit_entry.pack(fill="x", ipady=6, pady=(0, 8))
-        self._clipboard(self.limit_entry)
-        self.hint = tk.Label(
-            card,
-            text="G&G считает страницы, PartsAgro — товары, AgriParts — артикулы.",
-            bg=SURFACE,
-            fg=MUTED,
-            font=("Segoe UI", 9),
-            wraplength=280,
-            justify="left",
-        )
-        self.hint.pack(anchor="w", pady=(0, 8))
-
-        self.action = self.actions["gng"]
-        self.pause_btn = tk.Button(
-            card,
-            text="Пауза",
-            command=self._pause,
-            bg=RAISED,
-            fg=FG,
-            relief="flat",
-            font=("Segoe UI", 12, "bold"),
-        )
-        self.resume = tk.Button(
-            card,
-            text="Продолжить",
-            command=self._resume,
-            bg=ACCENT,
-            fg=INK,
-            relief="flat",
-            font=("Segoe UI", 12, "bold"),
-        )
-
-        meta = tk.Frame(card, bg=SURFACE)
-        self.rows_label = self.row_labels["gng"]
-        self.file_btn = self.file_btns["gng"]
+            modes = tk.Frame(block, bg=RAISED)
+            modes.pack(fill="x", pady=(8, 0))
+            all_btn = tk.Button(modes, text="Весь", command=lambda key=job_id: self._mode(key, False))
+            limit_btn = tk.Button(modes, text="Лимит", command=lambda key=job_id: self._mode(key, True))
+            all_btn.pack(side="left", expand=True, fill="x", padx=(0, 4))
+            limit_btn.pack(side="left", expand=True, fill="x")
+            self.all_btns[job_id] = all_btn
+            self.limit_btns[job_id] = limit_btn
+            limit_box = tk.Frame(block, bg=RAISED)
+            entry = tk.Entry(limit_box, textvariable=self.pages[job_id], bg=BG, fg=FG, insertbackground=FG, relief="flat", font=("Consolas", 12))
+            entry.pack(fill="x", ipady=5, pady=(6, 0))
+            self._clipboard(entry)
+            self.limit_boxes[job_id] = limit_box
+            controls = tk.Frame(block, bg=RAISED)
+            controls.pack(fill="x", pady=(8, 0))
+            pause = tk.Button(controls, text="Пауза", command=lambda key=job_id: self._pause(key), bg=RAISED, fg=FG, relief="flat", font=("Segoe UI", 10, "bold"))
+            resume = tk.Button(controls, text="Продолжить", command=lambda key=job_id: self._resume(key), bg=ACCENT, fg=INK, relief="flat", font=("Segoe UI", 10, "bold"))
+            pause.pack(side="left", expand=True, fill="x", padx=(0, 4), ipady=4)
+            resume.pack(side="left", expand=True, fill="x", ipady=4)
+            self.pause_btns[job_id] = pause
+            self.resume_btns[job_id] = resume
 
         self.error = tk.Label(card, text="", bg=SURFACE, fg=FG, font=("Segoe UI", 9), wraplength=280, justify="left")
         self.error.pack(anchor="w", pady=(8, 0))
@@ -456,22 +437,19 @@ class Desk(tk.Tk):
         else:
             button.configure(bg=BG, fg=MUTED, activebackground=RAISED, activeforeground=FG, relief="flat", bd=0, highlightbackground=LINE, highlightthickness=1)
 
-    def _mode(self, limited):
-        self.limited.set(limited)
+    def _mode(self, job_id, limited):
+        self.limited[job_id].set(limited)
         self._paint_mode()
 
     def _paint_mode(self):
-        self._style_button(self.all_btn, not self.limited.get())
-        self._style_button(self.limit_btn, self.limited.get())
-        if self.limited.get():
-            self.hint.pack_forget()
-            if not self.limit_box.winfo_ismapped():
-                self.limit_box.pack(fill="x", before=self.error)
-        else:
-            self.limit_box.pack_forget()
-            if not self.hint.winfo_ismapped():
-                self.hint.pack(fill="x", before=self.error)
         for job_id, spec in JOBS.items():
+            self._style_button(self.all_btns[job_id], not self.limited[job_id].get())
+            self._style_button(self.limit_btns[job_id], self.limited[job_id].get())
+            if self.limited[job_id].get():
+                if not self.limit_boxes[job_id].winfo_ismapped():
+                    self.limit_boxes[job_id].pack(fill="x", before=self.pause_btns[job_id].master)
+            else:
+                self.limit_boxes[job_id].pack_forget()
             running = self.jobs[job_id]["status"] == "running"
             button = self.actions[job_id]
             if running:
@@ -488,10 +466,7 @@ class Desk(tk.Tk):
         self.badges[job_id].configure(text=LABELS.get(status, status))
         self.count.configure(text=f"в работе {self._running_count()}")
         if self._running_count() == 0:
-            self.resume.pack_forget()
-            self.pause_btn.pack_forget()
-        else:
-            self._show_pause()
+            self.error.configure(text="")
         self._paint_mode()
 
     def _show_log(self, job_id):
@@ -535,16 +510,12 @@ class Desk(tk.Tk):
             log.insert("end", line + "\n", tag)
             log.see("end")
             log.configure(state="disabled")
-        if line.startswith("ПАУЗА"):
-            self.pause_btn.pack_forget()
-            if not self.resume.winfo_ismapped():
-                self.resume.pack(fill="x", ipady=8, pady=(0, 8), before=self.error)
-            self.error.configure(text="Пауза. Когда будешь готов, нажми «Продолжить».", fg=ACCENT)
-        elif line.startswith("Продолжаю") or line.startswith("Остановка") or line.startswith("DONE") or line.startswith("Готово"):
-            if not any(job["status"] == "running" and self.resume.winfo_ismapped() for job in self.jobs.values()):
-                self.resume.pack_forget()
-            if self._running_count():
-                self._show_pause()
+        if line.startswith("ПАУЗА") and job_id:
+            self.resume_btns[job_id].configure(bg=ACCENT, fg=INK)
+            self.error.configure(text=f"{JOBS[job_id]['label']}: пауза. Нажми «Продолжить» у него.", fg=ACCENT)
+        elif line.startswith("Продолжаю") and job_id:
+            self.resume_btns[job_id].configure(bg=RAISED, fg=FG)
+            self.error.configure(text="")
         if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
             self.error.configure(text=line, fg="#ffb4a2")
         if job_id and line.startswith("ROWS "):
@@ -555,31 +526,22 @@ class Desk(tk.Tk):
         if job_id and self.jobs[job_id]["out"].is_file():
             self.file_btns[job_id].configure(text="Открыть Excel", fg=FG)
 
-    def _show_pause(self):
-        if self.resume.winfo_ismapped():
+    def _pause(self, job_id):
+        job = self.jobs[job_id]
+        if job["status"] != "running":
             return
-        if not self.pause_btn.winfo_ismapped():
-            self.pause_btn.pack(fill="x", ipady=8, pady=(0, 8), before=self.error)
+        folder = JOBS[job_id]["dir"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "pause.flag").write_text("1", encoding="utf-8")
+        self._append("Пауза запрошена. Дождусь конца текущего шага.", job_id)
 
-    def _pause(self):
-        for job_id, job in self.jobs.items():
-            if job["status"] != "running":
-                continue
-            folder = JOBS[job_id]["dir"]
-            folder.mkdir(parents=True, exist_ok=True)
-            (folder / "pause.flag").write_text("1", encoding="utf-8")
-        self.pause_btn.pack_forget()
-        self._append("Пауза запрошена. Дождусь конца текущего шага.")
-
-    def _resume(self):
-        for spec in JOBS.values():
-            spec["dir"].mkdir(parents=True, exist_ok=True)
-            (spec["dir"] / "continue.flag").write_text("1", encoding="utf-8")
-        self.resume.pack_forget()
+    def _resume(self, job_id):
+        folder = JOBS[job_id]["dir"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "continue.flag").write_text("1", encoding="utf-8")
+        self.resume_btns[job_id].configure(bg=RAISED, fg=FG)
         self.error.configure(text="")
-        self._append("Сигнал «Продолжить» отправлен")
-        if self._running_count():
-            self._show_pause()
+        self._append("Сигнал «Продолжить» отправлен", job_id)
 
     def _toggle(self, job_id):
         self.error.configure(text="")
@@ -594,9 +556,9 @@ class Desk(tk.Tk):
             self.error.configure(text=f"Не найден парсер {spec['label']}.")
             return
         pages = 0
-        if self.limited.get():
+        if self.limited[job_id].get():
             try:
-                pages = int(self.pages.get())
+                pages = int(self.pages[job_id].get())
             except ValueError:
                 self.error.configure(text="Лимит — целое число.")
                 return
