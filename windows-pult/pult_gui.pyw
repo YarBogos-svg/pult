@@ -12,12 +12,27 @@ from pathlib import Path
 from tkinter import messagebox
 
 ROOT = Path(__file__).resolve().parent
-SCRIPT = ROOT / "parsers" / "gng.py"
-RESULTS = ROOT / "results" / "gng"
+RESULTS = ROOT / "results"
 ICON = ROOT / "pult.ico"
 VERSION_PATH = ROOT / "version.txt"
 UPDATE_BASE = "https://raw.githubusercontent.com/YarBogos-svg/pult/main"
-UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "requirements.txt")
+UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "requirements.txt")
+JOBS = {
+    "gng": {
+        "label": "G&G",
+        "site": "John Deere · gngzap.com",
+        "script": ROOT / "parsers" / "gng.py",
+        "dir": RESULTS / "gng",
+        "file": "gng.xlsx",
+    },
+    "parts": {
+        "label": "PartsAgro",
+        "site": "Все бренды · data.partsagro.ru",
+        "script": ROOT / "parsers" / "partsagro.py",
+        "dir": RESULTS / "partsagro",
+        "file": "partsagro.xlsx",
+    },
+}
 
 BG = "#14160f"
 SURFACE = "#1d2116"
@@ -59,6 +74,14 @@ class Desk(tk.Tk):
         self.pages = tk.StringVar(value="10")
         self.login = tk.StringVar(value=self._saved_login())
         self.password = tk.StringVar()
+        self.jobs = {}
+        for job_id, spec in JOBS.items():
+            self.jobs[job_id] = {
+                "status": "idle",
+                "proc": None,
+                "rows": 0,
+                "out": spec["dir"] / spec["file"],
+            }
 
         self._build()
         self.after(200, self._pump)
@@ -79,7 +102,7 @@ class Desk(tk.Tk):
         return "0"
 
     def _check_update(self):
-        if self.status == "running":
+        if self._running_count():
             self._append("Сначала останови сбор, потом обновление.")
             return
         self.update_btn.configure(text="Проверяю…")
@@ -157,12 +180,33 @@ class Desk(tk.Tk):
         card = tk.Frame(body, bg=SURFACE, highlightbackground=LINE, highlightthickness=1, padx=14, pady=14)
         card.grid(row=0, column=0, sticky="ns", padx=(0, 14))
 
-        top = tk.Frame(card, bg=SURFACE)
-        top.pack(fill="x")
-        tk.Label(top, text="G&G", bg=SURFACE, fg=FG, font=("Segoe UI", 16, "bold")).pack(side="left")
-        self.badge = tk.Label(top, text="Ждёт", bg=RAISED, fg=FG, font=("Segoe UI", 9), padx=8, pady=3)
-        self.badge.pack(side="right")
-        tk.Label(card, text="John Deere · gngzap.com", bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 10))
+        self.badges = {}
+        self.actions = {}
+        self.row_labels = {}
+        self.file_btns = {}
+        for job_id, spec in JOBS.items():
+            block = tk.Frame(card, bg=SURFACE)
+            block.pack(fill="x", pady=(0, 10))
+            top = tk.Frame(block, bg=SURFACE)
+            top.pack(fill="x")
+            tk.Label(top, text=spec["label"], bg=SURFACE, fg=FG, font=("Segoe UI", 16, "bold")).pack(side="left")
+            badge = tk.Label(top, text="Ждёт", bg=RAISED, fg=FG, font=("Segoe UI", 9), padx=8, pady=3)
+            badge.pack(side="right")
+            self.badges[job_id] = badge
+            tk.Label(block, text=spec["site"], bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 8))
+            action = tk.Button(block, text=spec["label"], command=lambda key=job_id: self._toggle(key), font=("Segoe UI", 12, "bold"))
+            action.pack(fill="x", ipady=8)
+            self.actions[job_id] = action
+            meta = tk.Frame(block, bg=SURFACE)
+            meta.pack(fill="x", pady=(6, 0))
+            rows = tk.Label(meta, text="0 строк", bg=SURFACE, fg=MUTED, font=("Consolas", 10))
+            rows.pack(side="left")
+            self.row_labels[job_id] = rows
+            file_btn = tk.Button(
+                meta, text="файла нет", command=lambda key=job_id: self._open_job(key), bg=SURFACE, fg=MUTED, relief="flat", font=("Segoe UI", 10)
+            )
+            file_btn.pack(side="right")
+            self.file_btns[job_id] = file_btn
 
         tk.Label(card, text="Объём", bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w")
         modes = tk.Frame(card, bg=SURFACE)
@@ -180,7 +224,7 @@ class Desk(tk.Tk):
         self._clipboard(self.limit_entry)
         self.hint = tk.Label(
             card,
-            text="Число страниц берётся с сайта, до последней.",
+            text="G&G: страницы. PartsAgro: товаров на бренд. Пусто — весь каталог.",
             bg=SURFACE,
             fg=MUTED,
             font=("Segoe UI", 9),
@@ -189,8 +233,7 @@ class Desk(tk.Tk):
         )
         self.hint.pack(anchor="w", pady=(0, 8))
 
-        self.action = tk.Button(card, text="G&G", command=self._toggle, font=("Segoe UI", 12, "bold"))
-        self.action.pack(fill="x", ipady=8, pady=(4, 8))
+        self.action = self.actions["gng"]
         self.pause_btn = tk.Button(
             card,
             text="Пауза",
@@ -211,15 +254,10 @@ class Desk(tk.Tk):
         )
 
         meta = tk.Frame(card, bg=SURFACE)
-        meta.pack(fill="x")
-        self.rows_label = tk.Label(meta, text="0 строк", bg=SURFACE, fg=MUTED, font=("Consolas", 10))
-        self.rows_label.pack(side="left")
-        self.file_btn = tk.Button(
-            meta, text="файла нет", command=self._open_file, bg=SURFACE, fg=MUTED, relief="flat", font=("Segoe UI", 10)
-        )
-        self.file_btn.pack(side="right")
+        self.rows_label = self.row_labels["gng"]
+        self.file_btn = self.file_btns["gng"]
 
-        tk.Label(card, text="Вход на сайт", bg=SURFACE, fg=FG, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(14, 2))
+        tk.Label(card, text="Вход на сайт", bg=SURFACE, fg=FG, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(8, 2))
         tk.Label(card, text="Необязательно.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w")
         self._field(card, self.login, "Логин")
         self._field(card, self.password, "Пароль", show="•")
@@ -230,7 +268,7 @@ class Desk(tk.Tk):
         log_wrap.grid(row=0, column=1, sticky="nsew")
         bar = tk.Frame(log_wrap, bg=BG)
         bar.pack(fill="x")
-        tk.Label(bar, text="Журнал G&G", bg=BG, fg=FG, font=("Segoe UI", 11, "bold")).pack(side="left", padx=12, pady=10)
+        tk.Label(bar, text="Журнал", bg=BG, fg=FG, font=("Segoe UI", 11, "bold")).pack(side="left", padx=12, pady=10)
         tk.Button(
             bar,
             text="Лог ошибок",
@@ -246,7 +284,7 @@ class Desk(tk.Tk):
         self.log.tag_configure("err", foreground="#ffb4a2")
         self.log.tag_configure("pause", foreground="#c6e05a")
         self.log.pack(fill="both", expand=True)
-        self.log.insert("1.0", "Нажми кнопку G&G — здесь пойдут страницы, строки и ошибки.")
+        self.log.insert("1.0", "Нажми G&G или PartsAgro — здесь пойдут страницы, строки и ошибки.")
         self.log.configure(state="disabled")
         self._paint_mode()
 
@@ -323,8 +361,6 @@ class Desk(tk.Tk):
             button.configure(bg=BG, fg=MUTED, activebackground=RAISED, activeforeground=FG, relief="flat", bd=0, highlightbackground=LINE, highlightthickness=1)
 
     def _mode(self, limited):
-        if self.status == "running":
-            return
         self.limited.set(limited)
         self._paint_mode()
 
@@ -333,114 +369,135 @@ class Desk(tk.Tk):
         self._style_button(self.limit_btn, self.limited.get())
         if self.limited.get():
             self.hint.pack_forget()
-            self.limit_box.pack(fill="x", before=self.action)
+            if not self.limit_box.winfo_ismapped():
+                self.limit_box.pack(fill="x", before=self.error)
         else:
             self.limit_box.pack_forget()
-            self.hint.pack(fill="x", before=self.action)
-        if self.status == "running":
-            self.action.configure(text="Остановить", bg=RAISED, fg=FG, activebackground=RAISED, activeforeground=FG, relief="flat")
-        else:
-            self.action.configure(text="G&G", bg=ACCENT, fg=INK, activebackground=ACCENT, activeforeground=INK, relief="flat")
+            if not self.hint.winfo_ismapped():
+                self.hint.pack(fill="x", before=self.error)
+        for job_id, spec in JOBS.items():
+            running = self.jobs[job_id]["status"] == "running"
+            button = self.actions[job_id]
+            if running:
+                button.configure(text="Остановить", bg=RAISED, fg=FG, activebackground=RAISED, activeforeground=FG, relief="flat")
+            else:
+                button.configure(text=spec["label"], bg=ACCENT, fg=INK, activebackground=ACCENT, activeforeground=INK, relief="flat")
 
-    def _set_status(self, status):
-        self.status = status
-        self.badge.configure(text=LABELS.get(status, status))
-        self.count.configure(text="в работе 1" if status == "running" else "в работе 0")
-        if status != "running":
+    def _running_count(self):
+        return sum(1 for job in self.jobs.values() if job["status"] == "running")
+
+    def _set_status(self, job_id, status):
+        job = self.jobs[job_id]
+        job["status"] = status
+        self.badges[job_id].configure(text=LABELS.get(status, status))
+        self.count.configure(text=f"в работе {self._running_count()}")
+        if self._running_count() == 0:
             self.resume.pack_forget()
             self.pause_btn.pack_forget()
         else:
             self._show_pause()
         self._paint_mode()
 
-    def _append(self, line):
+    def _append(self, line, job_id=None):
         self.log.configure(state="normal")
         current = self.log.get("1.0", "end").strip()
-        if current.startswith("Нажми кнопку"):
+        if current.startswith("Нажми "):
             self.log.delete("1.0", "end")
         tag = ""
         if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
             tag = "err"
         elif line.startswith("ПАУЗА"):
             tag = "pause"
-        self.log.insert("end", line + "\n", tag)
+        prefix = f"[{JOBS[job_id]['label']}] " if job_id else ""
+        self.log.insert("end", prefix + line + "\n", tag)
         self.log.see("end")
         self.log.configure(state="disabled")
         if line.startswith("ПАУЗА"):
             self.pause_btn.pack_forget()
-            self.resume.pack(fill="x", ipady=8, pady=(0, 8), before=self.rows_label.master)
+            if not self.resume.winfo_ismapped():
+                self.resume.pack(fill="x", ipady=8, pady=(0, 8), before=self.error)
             self.error.configure(text="Пауза. Когда будешь готов, нажми «Продолжить».", fg=ACCENT)
         elif line.startswith("Продолжаю") or line.startswith("Остановка") or line.startswith("DONE") or line.startswith("Готово"):
-            self.resume.pack_forget()
-            if self.status == "running":
+            if not any(job["status"] == "running" and self.resume.winfo_ismapped() for job in self.jobs.values()):
+                self.resume.pack_forget()
+            if self._running_count():
                 self._show_pause()
         if line.startswith("ОШИБКА") or line.startswith("Код выхода"):
             self.error.configure(text=line, fg="#ffb4a2")
-        if line.startswith("ROWS "):
+        if job_id and line.startswith("ROWS "):
             tail = line.split()[-1]
             if tail.isdigit():
-                self.rows = int(tail)
-                self.rows_label.configure(text=f"{self.rows} строк")
-        if self.out_file and self.out_file.is_file():
-            self.file_btn.configure(text="Открыть Excel", fg=FG)
+                self.jobs[job_id]["rows"] = int(tail)
+                self.row_labels[job_id].configure(text=f"{tail} строк")
+        if job_id and self.jobs[job_id]["out"].is_file():
+            self.file_btns[job_id].configure(text="Открыть Excel", fg=FG)
 
     def _show_pause(self):
         if self.resume.winfo_ismapped():
             return
         if not self.pause_btn.winfo_ismapped():
-            self.pause_btn.pack(fill="x", ipady=8, pady=(0, 8), before=self.rows_label.master)
+            self.pause_btn.pack(fill="x", ipady=8, pady=(0, 8), before=self.error)
 
     def _pause(self):
-        RESULTS.mkdir(parents=True, exist_ok=True)
-        (RESULTS / "pause.flag").write_text("1", encoding="utf-8")
+        for job_id, job in self.jobs.items():
+            if job["status"] != "running":
+                continue
+            folder = JOBS[job_id]["dir"]
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "pause.flag").write_text("1", encoding="utf-8")
         self.pause_btn.pack_forget()
         self._append("Пауза запрошена. Дождусь конца текущего шага.")
 
     def _resume(self):
-        RESULTS.mkdir(parents=True, exist_ok=True)
-        (RESULTS / "continue.flag").write_text("1", encoding="utf-8")
+        for spec in JOBS.values():
+            spec["dir"].mkdir(parents=True, exist_ok=True)
+            (spec["dir"] / "continue.flag").write_text("1", encoding="utf-8")
         self.resume.pack_forget()
         self.error.configure(text="")
         self._append("Сигнал «Продолжить» отправлен")
+        if self._running_count():
+            self._show_pause()
 
-    def _toggle(self):
+    def _toggle(self, job_id):
         self.error.configure(text="")
-        if self.status == "running":
-            self._stop()
+        if self.jobs[job_id]["status"] == "running":
+            self._stop(job_id)
         else:
-            self._start()
+            self._start(job_id)
 
-    def _start(self):
-        if not SCRIPT.is_file():
-            self.error.configure(text="Не найден парсер G&G.")
+    def _start(self, job_id):
+        spec = JOBS[job_id]
+        if not spec["script"].is_file():
+            self.error.configure(text=f"Не найден парсер {spec['label']}.")
             return
         pages = 0
         if self.limited.get():
             try:
                 pages = int(self.pages.get())
             except ValueError:
-                self.error.configure(text="Лимит — целое число страниц.")
+                self.error.configure(text="Лимит — целое число.")
                 return
             if pages < 1 or pages > 5000:
-                self.error.configure(text="Лимит страниц — от 1 до 5000.")
+                self.error.configure(text="Лимит — от 1 до 5000.")
                 return
         login = self.login.get().strip()
         (ROOT / "login.txt").write_text(login, encoding="utf-8")
-        RESULTS.mkdir(parents=True, exist_ok=True)
-        self.out_file = RESULTS / "gng.xlsx"
+        spec["dir"].mkdir(parents=True, exist_ok=True)
+        out_file = spec["dir"] / spec["file"]
+        self.jobs[job_id]["out"] = out_file
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
         env["GNG_LOGIN"] = login
         env["GNG_PASSWORD"] = self.password.get()
+        env["PARTS_LOGIN"] = login
+        env["PARTS_PASSWORD"] = self.password.get()
         env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
-        flags = 0
-        if os.name == "nt":
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
-            self.proc = subprocess.Popen(
-                [sys.executable, "-u", str(SCRIPT), "--pages", str(pages), "--out", str(self.out_file), "--show"],
+            proc = subprocess.Popen(
+                [sys.executable, "-u", str(spec["script"]), "--pages", str(pages), "--out", str(out_file), "--show"],
                 cwd=str(ROOT),
                 env=env,
                 stdout=subprocess.PIPE,
@@ -450,72 +507,75 @@ class Desk(tk.Tk):
         except OSError as error:
             self.error.configure(text=str(error))
             return
-        self.rows = 0
-        self.rows_label.configure(text="0 строк")
-        self.file_btn.configure(text="файла нет", fg=MUTED)
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
-        self._set_status("running")
-        self._append("Старт G&G, " + (f"не больше {pages} стр." if pages else "весь каталог"))
-        threading.Thread(target=self._read, args=(self.proc,), daemon=True).start()
+        self.jobs[job_id]["proc"] = proc
+        self.jobs[job_id]["rows"] = 0
+        self.row_labels[job_id].configure(text="0 строк")
+        self.file_btns[job_id].configure(text="файла нет", fg=MUTED)
+        self._set_status(job_id, "running")
+        limit_text = f"лимит {pages}" if pages else "весь каталог"
+        self._append(f"Старт, {limit_text}", job_id)
+        threading.Thread(target=self._read, args=(job_id, proc), daemon=True).start()
 
-    def _read(self, proc):
+    def _read(self, job_id, proc):
         stream = proc.stdout
         if stream is not None:
             for raw in iter(stream.readline, b""):
-                self.events.put(("log", raw.decode("utf-8", "replace").rstrip()))
+                self.events.put(("log", job_id, raw.decode("utf-8", "replace").rstrip()))
             stream.close()
-        code = proc.wait()
-        self.events.put(("exit", code))
+        self.events.put(("exit", job_id, proc.wait()))
 
-    def _stop(self):
-        proc = self.proc
+    def _stop(self, job_id):
+        proc = self.jobs[job_id]["proc"]
         if proc is None:
             return
-        self._append("Останавливаю")
+        self._append("Останавливаю", job_id)
         if os.name == "nt":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
         else:
             proc.terminate()
-        self._set_status("stopped")
+        self._set_status(job_id, "stopped")
 
     def _pump(self):
         while True:
             try:
-                kind, payload = self.events.get_nowait()
+                event = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "log" and payload:
-                self._append(payload)
+            kind = event[0]
+            if kind == "log":
+                if len(event) == 3:
+                    _, job_id, payload = event
+                else:
+                    job_id, payload = None, event[1]
+                if payload:
+                    self._append(payload, job_id)
             elif kind == "update_idle":
                 self.update_btn.configure(text="Обновить")
             elif kind == "restart":
-                self._append(f"Обновление {payload} установлено. Перезапускаю.")
+                self._append(f"Обновление {event[1]} установлено. Перезапускаю.")
                 self.after(700, self._restart)
-            elif kind == "exit" and self.status == "running":
-                self.proc = None
-                if payload == 0:
-                    self._set_status("done")
-                    self._append("Готово")
-                else:
-                    self._set_status("error")
-                    self._append(f"Код выхода {payload}")
-                if self.out_file and self.out_file.is_file():
-                    self.file_btn.configure(text="Открыть Excel", fg=FG)
+            elif kind == "exit":
+                _, job_id, code = event
+                if self.jobs[job_id]["status"] == "running":
+                    self.jobs[job_id]["proc"] = None
+                    self._set_status(job_id, "done" if code == 0 else "error")
+                    self._append("Готово" if code == 0 else f"Код выхода {code}", job_id)
+                if self.jobs[job_id]["out"].is_file():
+                    self.file_btns[job_id].configure(text="Открыть Excel", fg=FG)
         self.after(200, self._pump)
 
     def _open_log(self):
-        path = RESULTS / "gng.log"
-        if not path.is_file():
-            self.error.configure(text="Файла ошибок ещё нет — он появится после запуска.")
-            return
-        self._open_path(path)
+        for spec in JOBS.values():
+            path = spec["dir"] / spec["file"].replace(".xlsx", ".log")
+            if path.is_file():
+                self._open_path(path)
+                return
+        self.error.configure(text="Файла ошибок ещё нет — он появится после запуска.")
 
-    def _open_file(self):
-        if not self.out_file or not self.out_file.is_file():
-            return
-        self._open_path(self.out_file)
+    def _open_job(self, job_id):
+        path = self.jobs[job_id]["out"]
+        if path.is_file():
+            self._open_path(path)
 
     def _open_path(self, path):
         if os.name == "nt":
@@ -524,10 +584,12 @@ class Desk(tk.Tk):
             subprocess.Popen(["xdg-open", str(path)])
 
     def _close(self):
-        if self.status == "running":
+        if self._running_count():
             if not messagebox.askokcancel("Пульт", "Сбор ещё идёт. Закрыть и остановить?"):
                 return
-            self._stop()
+            for job_id, job in list(self.jobs.items()):
+                if job["status"] == "running":
+                    self._stop(job_id)
         self.destroy()
 
 
