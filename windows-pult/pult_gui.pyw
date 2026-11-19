@@ -17,7 +17,7 @@ RESULTS = ROOT / "results"
 ICON = ROOT / "pult.ico"
 VERSION_PATH = ROOT / "version.txt"
 UPDATE_BASE = "https://raw.githubusercontent.com/YarBogos-svg/pult/main"
-UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "requirements.txt")
+UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "parsers/agriparts.py", "parsers/Книга3.xlsx", "requirements.txt")
 JOBS = {
     "gng": {
         "label": "G&G",
@@ -39,6 +39,13 @@ JOBS = {
         "script": ROOT / "parsers" / "partsmanager.py",
         "dir": RESULTS / "partsmanager",
         "file": "partsmanager.xlsx",
+    },
+    "agri": {
+        "label": "AgriParts",
+        "site": "Поиск по Книга3 · agriparts.su",
+        "script": ROOT / "parsers" / "agriparts.py",
+        "dir": RESULTS / "agriparts",
+        "file": "agriparts.xlsx",
     },
 }
 
@@ -276,7 +283,7 @@ class Desk(tk.Tk):
         self._clipboard(self.limit_entry)
         self.hint = tk.Label(
             card,
-            text="G&G считает страницы, PartsAgro — товары на бренд.",
+            text="G&G считает страницы, PartsAgro — товары, AgriParts — артикулы.",
             bg=SURFACE,
             fg=MUTED,
             font=("Segoe UI", 9),
