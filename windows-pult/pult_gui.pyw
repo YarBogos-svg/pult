@@ -6,9 +6,9 @@ import queue
 import subprocess
 import sys
 import threading
-import time
 import tkinter as tk
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox
 
@@ -90,13 +90,20 @@ class Desk(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._close)
 
     def _fetch(self, path):
-        stamp = int(time.time())
-        request = urllib.request.Request(
-            f"https://api.github.com/repos/YarBogos-svg/pult/contents/{path}?t={stamp}",
-            headers={"User-Agent": "pult", "Accept": "application/vnd.github.raw", "Cache-Control": "no-cache"},
+        stamp = datetime.now().strftime("%Y%m%d%H%M")
+        urls = (
+            f"https://raw.githubusercontent.com/YarBogos-svg/pult/main/{path}?t={stamp}",
+            f"https://cdn.jsdelivr.net/gh/YarBogos-svg/pult@main/{path}",
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.read()
+        last = None
+        for url in urls:
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": "pult", "Cache-Control": "no-cache"})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    return response.read()
+            except Exception as error:
+                last = error
+        raise last
 
     def _local_version(self):
         if VERSION_PATH.is_file():
@@ -114,7 +121,10 @@ class Desk(tk.Tk):
         try:
             remote = self._fetch("version.txt").decode("utf-8").strip()
         except Exception as error:
-            self.events.put(("log", f"Обновление недоступно: {error}"))
+            text = str(error)
+            if "rate limit" in text or "403" in text:
+                text = "GitHub временно ограничил запросы. Подожди минуту и нажми «Обновить» ещё раз."
+            self.events.put(("log", f"Обновление недоступно: {text}"))
             self.events.put(("update_idle", ""))
             return
         if not remote or remote == self._local_version():
