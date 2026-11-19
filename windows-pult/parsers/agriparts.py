@@ -297,9 +297,11 @@ async def main() -> None:
     for flag in (CONTINUE, PAUSE):
         if flag.exists():
             flag.unlink()
-    source = Path(__file__).with_name("Книга3.xlsx")
+    source = Path(__file__).with_name("articles.xlsx")
     if not source.is_file():
-        log_error("Нет файла Книга3.xlsx рядом с парсером.")
+        source = Path(__file__).with_name("Книга3.xlsx")
+    if not source.is_file():
+        log_error("Нет файла articles.xlsx рядом с парсером.")
         return
     articles = load_articles(source)
     if limit:

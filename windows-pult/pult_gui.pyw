@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +18,7 @@ RESULTS = ROOT / "results"
 ICON = ROOT / "pult.ico"
 VERSION_PATH = ROOT / "version.txt"
 UPDATE_BASE = "https://raw.githubusercontent.com/YarBogos-svg/pult/main"
-UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "parsers/agriparts.py", "parsers/Книга3.xlsx", "requirements.txt")
+UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "parsers/agriparts.py", "parsers/articles.xlsx", "requirements.txt")
 JOBS = {
     "gng": {
         "label": "G&G",
@@ -117,7 +118,8 @@ class Desk(tk.Tk):
         raise RuntimeError("не нашёл свежий коммит")
 
     def _fetch(self, path, sha):
-        url = f"https://raw.githubusercontent.com/YarBogos-svg/pult/{sha}/{path}"
+        quoted = urllib.parse.quote(path, safe="/")
+        url = f"https://raw.githubusercontent.com/YarBogos-svg/pult/{sha}/{quoted}"
         request = urllib.request.Request(url, headers={"User-Agent": "pult"})
         with urllib.request.urlopen(request, timeout=20) as response:
             return response.read()
