@@ -57,8 +57,8 @@ class Desk(tk.Tk):
         super().__init__()
         self.title("Пульт")
         self.configure(bg=BG)
-        self.geometry("980x640")
-        self.minsize(760, 520)
+        self.geometry("1120x760")
+        self.minsize(900, 640)
         if ICON.is_file():
             try:
                 self.iconbitmap(str(ICON))
@@ -177,37 +177,61 @@ class Desk(tk.Tk):
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
-        card = tk.Frame(body, bg=SURFACE, highlightbackground=LINE, highlightthickness=1, padx=14, pady=14)
-        card.grid(row=0, column=0, sticky="ns", padx=(0, 14))
+        side = tk.Frame(body, bg=BG, width=320)
+        side.grid(row=0, column=0, sticky="ns", padx=(0, 14))
+        side.grid_propagate(False)
+        side.rowconfigure(0, weight=1)
+        side.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(side, bg=SURFACE, highlightthickness=1, highlightbackground=LINE, bd=0)
+        scroll = tk.Scrollbar(side, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        card = tk.Frame(canvas, bg=SURFACE, padx=14, pady=14)
+        card_window = canvas.create_window((0, 0), window=card, anchor="nw")
+
+        def _fit(event):
+            canvas.itemconfigure(card_window, width=event.width)
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _grow(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        canvas.bind("<Configure>", _fit)
+        card.bind("<Configure>", _grow)
+        canvas.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(int(-event.delta / 120), "units"))
 
         self.badges = {}
         self.actions = {}
         self.row_labels = {}
         self.file_btns = {}
+        tk.Label(card, text="Парсеры", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 8))
         for job_id, spec in JOBS.items():
-            block = tk.Frame(card, bg=SURFACE)
-            block.pack(fill="x", pady=(0, 10))
-            top = tk.Frame(block, bg=SURFACE)
+            block = tk.Frame(card, bg=RAISED, padx=10, pady=10)
+            block.pack(fill="x", pady=(0, 8))
+            top = tk.Frame(block, bg=RAISED)
             top.pack(fill="x")
-            tk.Label(top, text=spec["label"], bg=SURFACE, fg=FG, font=("Segoe UI", 16, "bold")).pack(side="left")
-            badge = tk.Label(top, text="Ждёт", bg=RAISED, fg=FG, font=("Segoe UI", 9), padx=8, pady=3)
+            tk.Label(top, text=spec["label"], bg=RAISED, fg=FG, font=("Segoe UI", 14, "bold")).pack(side="left")
+            badge = tk.Label(top, text="Ждёт", bg=SURFACE, fg=FG, font=("Segoe UI", 9), padx=8, pady=2)
             badge.pack(side="right")
             self.badges[job_id] = badge
-            tk.Label(block, text=spec["site"], bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 8))
-            action = tk.Button(block, text=spec["label"], command=lambda key=job_id: self._toggle(key), font=("Segoe UI", 12, "bold"))
-            action.pack(fill="x", ipady=8)
+            tk.Label(block, text=spec["site"], bg=RAISED, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 8))
+            action = tk.Button(block, text=spec["label"], command=lambda key=job_id: self._toggle(key), font=("Segoe UI", 11, "bold"))
+            action.pack(fill="x", ipady=6)
             self.actions[job_id] = action
-            meta = tk.Frame(block, bg=SURFACE)
+            meta = tk.Frame(block, bg=RAISED)
             meta.pack(fill="x", pady=(6, 0))
-            rows = tk.Label(meta, text="0 строк", bg=SURFACE, fg=MUTED, font=("Consolas", 10))
+            rows = tk.Label(meta, text="0 строк", bg=RAISED, fg=MUTED, font=("Consolas", 10))
             rows.pack(side="left")
             self.row_labels[job_id] = rows
             file_btn = tk.Button(
-                meta, text="файла нет", command=lambda key=job_id: self._open_job(key), bg=SURFACE, fg=MUTED, relief="flat", font=("Segoe UI", 10)
+                meta, text="файла нет", command=lambda key=job_id: self._open_job(key), bg=RAISED, fg=MUTED, relief="flat", font=("Segoe UI", 10)
             )
             file_btn.pack(side="right")
             self.file_btns[job_id] = file_btn
 
+        tk.Frame(card, bg=LINE, height=1).pack(fill="x", pady=(6, 10))
         tk.Label(card, text="Объём", bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w")
         modes = tk.Frame(card, bg=SURFACE)
         modes.pack(fill="x", pady=(4, 8))
@@ -224,11 +248,11 @@ class Desk(tk.Tk):
         self._clipboard(self.limit_entry)
         self.hint = tk.Label(
             card,
-            text="G&G: страницы. PartsAgro: товаров на бренд. Пусто — весь каталог.",
+            text="G&G считает страницы, PartsAgro — товары на бренд.",
             bg=SURFACE,
             fg=MUTED,
             font=("Segoe UI", 9),
-            wraplength=260,
+            wraplength=280,
             justify="left",
         )
         self.hint.pack(anchor="w", pady=(0, 8))
@@ -257,8 +281,8 @@ class Desk(tk.Tk):
         self.rows_label = self.row_labels["gng"]
         self.file_btn = self.file_btns["gng"]
 
-        tk.Label(card, text="Вход на сайт", bg=SURFACE, fg=FG, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(8, 2))
-        tk.Label(card, text="Необязательно.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w")
+        tk.Label(card, text="Вход", bg=SURFACE, fg=FG, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
+        tk.Label(card, text="Свой для каждого сайта. Заполни перед запуском.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=280, justify="left").pack(anchor="w")
         self._field(card, self.login, "Логин")
         self._field(card, self.password, "Пароль", show="•")
         self.error = tk.Label(card, text="", bg=SURFACE, fg=FG, font=("Segoe UI", 9), wraplength=260, justify="left")
