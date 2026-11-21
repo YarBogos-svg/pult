@@ -377,8 +377,7 @@ def write_xlsx(path: Path, by_brand: dict[str, list[dict]]) -> None:
     tmp.replace(path)
 
 
-async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str], stop) -> list[dict]:
-    rows = []
+async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str], stop, save, rows: list[dict]) -> list[dict]:
     for page_num in range(limit or 500):
         if stop.is_set() or not await honor_pause(page, stop):
             break
@@ -426,6 +425,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
                 rows.extend(offers)
                 seen.add(item["url"])
                 log(f"предложений {len(offers)}")
+                save(catalog["name"], rows, seen)
             continue
         for index in range(count):
             if stop.is_set() or not await honor_pause(page, stop):
@@ -462,6 +462,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
             if href:
                 seen.add(href)
             log(f"предложений {len(offers)}")
+            save(catalog["name"], rows, seen)
             await open_url(page, url, stop, "возврат в каталог")
             await asyncio.sleep(0.6)
         await asyncio.sleep(random.uniform(0.4, 0.8))
@@ -485,11 +486,17 @@ async def main() -> None:
         if flag.exists():
             flag.unlink()
     progress_path = out.with_name("progress.json")
-    if progress_path.is_file():
-        progress_path.unlink()
-        log("Старый прогресс сброшен, собираю заново")
-    by_brand = {}
-    seen = set()
+    saved = json.loads(progress_path.read_text(encoding="utf-8")) if progress_path.is_file() else {}
+    by_brand = saved.get("rows", {})
+    seen = set(saved.get("seen", []))
+    if seen:
+        log(f"Продолжаю с сохранения: уже {sum(len(items) for items in by_brand.values())} строк")
+
+    def save(name: str, rows: list[dict], done: set[str]) -> None:
+        by_brand[name] = rows
+        progress_path.write_text(json.dumps({"rows": by_brand, "seen": list(done)}, ensure_ascii=False), encoding="utf-8")
+        write_xlsx(out, by_brand)
+        log(f"Сохранено {sum(len(items) for items in by_brand.values())} строк")
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -520,11 +527,9 @@ async def main() -> None:
         for catalog in catalogs:
             if stop.is_set():
                 break
-            rows = await scrape_catalog(page, catalog, limit, seen, stop)
-            by_brand.setdefault(catalog["name"], []).extend(rows)
-            progress_path.write_text(json.dumps({"rows": by_brand, "seen": list(seen)}, ensure_ascii=False), encoding="utf-8")
-            write_xlsx(out, by_brand)
-            log(f"ROWS {sum(len(items) for items in by_brand.values())}")
+            rows = list(by_brand.get(catalog["name"], []))
+            await scrape_catalog(page, catalog, limit, seen, stop, save, rows)
+            save(catalog["name"], rows, seen)
         await browser.close()
     write_xlsx(out, by_brand)
     log(f"ROWS {sum(len(items) for items in by_brand.values())}")
