@@ -10,6 +10,7 @@ import re
 import signal
 import sys
 import traceback
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -26,7 +27,9 @@ COLUMNS = ["Артикул", "Номер", "Бренд", "Код_детали", 
 KNOWN = [
     {"name": "ALLBEST", "url": "https://partsmanager.ru/mycatalog/john-deere-allbest/john-deere-allbest?start={}"},
     {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/john-deere-pmpro/john-deere-pmpro?start={}"},
+    {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/pmpro/pmpro?start={}"},
     {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/pm-pro/pm-pro?start={}"},
+    {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/john-deere-pm-pro/john-deere-pm-pro?start={}"},
 ]
 LOG_FILE: Path | None = None
 CONTINUE: Path | None = None
@@ -71,7 +74,8 @@ def parse_price(value):
 
 
 def brand_key(value: str) -> str:
-    text = re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+    text = urllib.parse.unquote((value or "").lower())
+    text = re.sub(r"[^a-z0-9]+", "", text)
     if "allbest" in text:
         return "ALLBEST"
     if "pmpro" in text or text == "pm":
@@ -127,20 +131,31 @@ async def guard(page, stop, reason: str) -> bool:
 
 async def discover_catalogs(page) -> list[dict]:
     found = list(KNOWN)
+    await page.goto(HOME, timeout=90000, wait_until="domcontentloaded")
+    await asyncio.sleep(1.5)
+    for label in ("JOHN DEERE", "PM PRO", "PMPRO", "ALLBEST"):
+        locator = page.locator(f"text={label}").first
+        try:
+            if await locator.count() and await locator.is_visible():
+                await locator.hover()
+                await asyncio.sleep(0.4)
+        except Exception:
+            pass
     links = await page.evaluate(
-        """() => Array.from(document.querySelectorAll("a[href*='mycatalog']")).map((link) => ({
+        """() => Array.from(document.querySelectorAll("a[href]")).map((link) => ({
             href: link.href,
             text: (link.textContent || "").replace(/\\s+/g, " ").trim()
         }))"""
     )
     for link in links or []:
         href = (link.get("href") or "").split("?")[0].rstrip("/")
-        text = (link.get("text") or "").lower()
-        low = href.lower()
+        text = link.get("text") or ""
         key = brand_key(href + " " + text)
-        if not key:
+        low = href.lower()
+        if not key or "mycatalog" not in low:
             continue
         found.append({"name": key, "url": href + "?start={}"})
+        log(f"Нашёл каталог {key}: {href}")
     unique, seen = [], set()
     for item in found:
         if item["url"] in seen:
@@ -287,7 +302,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
         items = await catalog_items(page, catalog["name"])
         log(f"{catalog['name']}: карточек {len(items)} на {page.url}")
         if not items:
-            log(f"{catalog['name']}: на этой странице карточек нет, дальше не иду")
+            log(f"{catalog['name']}: карточек нет на {page.url}")
             break
         for item in items:
             if stop.is_set() or not await honor_pause(page, stop):
