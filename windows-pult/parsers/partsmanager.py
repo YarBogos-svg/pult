@@ -225,28 +225,40 @@ async def discover_catalogs(page) -> list[dict]:
 
 async def catalog_items(page, catalog_name: str) -> list[dict]:
     raw = await page.evaluate(
-        """() => Array.from(document.querySelectorAll("li.item, .catalog-item, .product-item")).map((card) => {
-            const value = (selector) => {
-                const node = card.querySelector(selector);
-                return node ? (node.value || node.textContent || "").trim() : "";
-            };
-            const link = card.querySelector(".priceButton a, .articleDesc a[href*='/parts/'], a[href*='/parts/']");
-            return {
-                sku: value("input[name='number']") || value(".articleDesc a"),
-                brand: value("input[name='brand']"),
-                name: value(".articleDesc a, .articleDesc"),
-                text: (card.innerText || "").replace(/\\s+/g, " ").trim(),
-                href: link ? link.href || link.getAttribute("href") || "" : ""
-            };
-        })"""
+        """() => {
+            const cards = Array.from(document.querySelectorAll("li.item, .catalog-item, .product-item, .product-card, [class*='product'], [class*='item']"));
+            const buttons = Array.from(document.querySelectorAll("a")).filter((link) =>
+                /цены и аналоги|посмотреть/i.test(link.textContent || "")
+            );
+            const sources = buttons.length ? buttons.map((button) => button.closest("li, .product-card, [class*='product'], [class*='item']") || button.parentElement) : cards;
+            return sources.filter(Boolean).map((card) => {
+                const value = (selector) => {
+                    const node = card.querySelector(selector);
+                    return node ? (node.value || node.textContent || "").trim() : "";
+                };
+                const link = card.querySelector("a[href*='/parts/']") || card.querySelector("a");
+                const article = Array.from(card.querySelectorAll("a")).map((node) => node.textContent.trim()).find((text) => /[A-Z0-9]{4,}/.test(text)) || "";
+                return {
+                    sku: value("input[name='number']") || article,
+                    brand: value("input[name='brand']"),
+                    name: value(".articleDesc a, .articleDesc") || card.innerText.split("\\n").slice(0, 3).join(" "),
+                    text: (card.innerText || "").replace(/\\s+/g, " ").trim(),
+                    href: link ? link.href || link.getAttribute("href") || "" : ""
+                };
+            });
+        }"""
     )
     items = []
+    seen = set()
     for card in raw or []:
         href = card.get("href") or ""
         if href.startswith("/"):
             href = "https://partsmanager.ru" + href
-        if not href or "/parts/" not in href:
+        if not href or href in seen:
             continue
+        if "/parts/" not in href and "mycatalog" in href:
+            continue
+        seen.add(href)
         brand = brand_key(" ".join([card.get("brand") or "", href, card.get("name") or "", card.get("text") or ""])) or catalog_name
         sku = card.get("sku") or href.rstrip("/").split("/")[-1]
         items.append({"sku": sku, "brand": brand, "name": re.sub(r"\s+", " ", card.get("name") or "").strip(), "url": href})
@@ -367,7 +379,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
         if not await guard(page, stop, f"Капча в каталоге {catalog['name']}."):
             break
         try:
-            await page.wait_for_selector("li.item", timeout=12000)
+            await page.wait_for_selector("li.item, a:has-text('Цены и аналоги'), a[href*='/parts/']", timeout=12000)
         except PlaywrightTimeout:
             log(f"{catalog['name']}: карточек больше нет")
             break
