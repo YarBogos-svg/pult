@@ -123,6 +123,64 @@ async def honor_pause(page, stop) -> bool:
     return await wait_user(page, stop, "Пауза по кнопке.")
 
 
+async def try_login(page, login: str, password: str, stop) -> None:
+    try:
+        log("Открываю PartsManager")
+        await page.goto(HOME, timeout=90000, wait_until="domcontentloaded")
+        await page.bring_to_front()
+        await asyncio.sleep(1.5)
+        if await is_challenge(page):
+            if not await wait_user(page, stop, "Сайт просит проверку перед входом."):
+                return
+        if login and password:
+            for selector in ("text=Вход", "text=Войти", "a[href*='login']"):
+                locator = page.locator(selector).first
+                if await locator.count() and await locator.is_visible():
+                    await locator.click()
+                    await page.wait_for_timeout(800)
+                    break
+            secret = page.locator("input[type='password']").first
+            if await secret.count():
+                form = page.locator("form").filter(has=page.locator("input[type='password']")).first
+                scope = form if await form.count() else page
+                user = scope.locator("input[type='email'], input[name*='mail'], input[name*='login'], input[type='text']").first
+                if await user.count():
+                    await user.fill(login)
+                    await secret.fill(password)
+                    submit = scope.locator("button[type='submit'], button:has-text('Войти')").first
+                    if await submit.count():
+                        await submit.click()
+                    else:
+                        await secret.press("Enter")
+                    await page.wait_for_timeout(2500)
+        if stop.is_set():
+            return
+        if await is_challenge(page):
+            if not await wait_user(page, stop, "После входа сайт просит проверку."):
+                return
+        if not await wait_user(page, stop, "Пауза после входа. Войди в PartsManager, если ещё не вошёл."):
+            return
+    except Exception as error:
+        if stop.is_set() or "has been closed" in str(error):
+            stop.set()
+            return
+        log_error(f"Вход не удался: {error}")
+        await wait_user(page, stop, "Вход не прошёл. Войди вручную.")
+
+
+async def open_offers(page) -> None:
+    for text in ("Посмотреть другие предложения", "Показать ещё", "Показать все", "Показать больше"):
+        button = page.locator(f"text={text}").first
+        try:
+            if await button.count() and await button.is_visible():
+                await button.click()
+                await page.wait_for_timeout(1200)
+                log(f"Нажал «{text}»")
+                return
+        except Exception:
+            continue
+
+
 async def guard(page, stop, reason: str) -> bool:
     if await is_challenge(page):
         return await wait_user(page, stop, reason)
@@ -198,10 +256,22 @@ async def catalog_items(page, catalog_name: str) -> list[dict]:
 async def offers_from_page(page, article: str, url: str) -> list[dict]:
     raw = await page.evaluate(
         """() => {
+            const main = {
+                brand: (document.querySelector("h1, .product-title, .article-title") || {}).innerText || "",
+                code: "",
+                name: "",
+                stock: "",
+                price: ""
+            };
+            const header = document.querySelector(".product-info, .article-info, .product-card") || document.body;
+            const stockEl = header.querySelector("[class*='availability'], [class*='stock'], [class*='nalich']");
+            const priceEl = header.querySelector("[class*='price']");
+            if (stockEl) main.stock = stockEl.innerText.trim();
+            if (priceEl) main.price = priceEl.innerText.trim();
             const rows = Array.from(document.querySelectorAll("tr.resultTr2, table tr")).filter((row) =>
                 row.querySelector(".resultBrand, .resultPartCode, td")
             );
-            return rows.map((row) => {
+            const table = rows.map((row) => {
                 const text = (selector) => {
                     const node = row.querySelector(selector);
                     return node ? node.innerText.trim() : "";
@@ -215,6 +285,8 @@ async def offers_from_page(page, article: str, url: str) -> list[dict]:
                     price: row.getAttribute("data-output-price") || text(".resultPrice") || cells[cells.length - 2] || ""
                 };
             }).filter((row) => row.brand || row.code || row.price);
+            if (!table.length && main.brand) table.unshift(main);
+            return table;
         }"""
     )
     offers = []
@@ -309,7 +381,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
                 return rows
             if item["url"] in seen:
                 continue
-            log(f"{item['brand']} {item['sku']}")
+            log(f"Открываю карточку {item['sku']}")
             try:
                 await page.goto(item["url"], timeout=90000, wait_until="domcontentloaded")
                 await asyncio.sleep(random.uniform(0.8, 1.4))
@@ -318,6 +390,7 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
                 continue
             if not await guard(page, stop, f"Капча на {item['sku']}."):
                 return rows
+            await open_offers(page)
             offers = await offers_from_page(page, item["sku"], item["url"])
             if not offers:
                 offers = [{
@@ -372,13 +445,8 @@ async def main() -> None:
         browser = await pw.chromium.launch(**launch)
         context = await browser.new_context(locale="ru-RU", viewport={"width": 1400, "height": 900})
         page = await context.new_page()
-        log("Открываю PartsManager")
-        try:
-            await page.goto(HOME, timeout=90000, wait_until="domcontentloaded")
-            await page.bring_to_front()
-        except Exception as error:
-            log(f"Сайт открылся с ошибкой: {error}")
-        if not await wait_user(page, stop, "Пауза в начале. Войди в аккаунт и реши капчу, если она есть."):
+        await try_login(page, os.environ.get("PULT_LOGIN", "").strip(), os.environ.get("PULT_PASSWORD", ""), stop)
+        if stop.is_set():
             await browser.close()
             return
         catalogs = await discover_catalogs(page)
