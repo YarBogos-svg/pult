@@ -379,40 +379,80 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
         if not await guard(page, stop, f"Капча в каталоге {catalog['name']}."):
             break
         try:
-            await page.wait_for_selector("li.item, a:has-text('Цены и аналоги'), a[href*='/parts/']", timeout=12000)
+            await page.wait_for_selector("a:has-text('Цены и аналоги'), a[href*='/parts/']", timeout=12000)
         except PlaywrightTimeout:
             log(f"{catalog['name']}: карточек больше нет")
             break
-        items = await catalog_items(page, catalog["name"])
-        log(f"{catalog['name']}: карточек {len(items)} на {page.url}")
-        if not items:
-            log(f"{catalog['name']}: карточек нет на {page.url}")
-            break
-        for item in items:
+        buttons = page.locator("a:has-text('Цены и аналоги')")
+        count = await buttons.count()
+        log(f"{catalog['name']}: кнопок «Цены и аналоги» {count}")
+        if count == 0:
+            items = await catalog_items(page, catalog["name"])
+            log(f"{catalog['name']}: карточек по ссылкам {len(items)}")
+            if not items:
+                break
+            for item in items:
+                if stop.is_set() or not await honor_pause(page, stop):
+                    return rows
+                if item["url"] in seen:
+                    continue
+                log(f"Открываю карточку {item['sku']}")
+                try:
+                    await page.goto(item["url"], timeout=90000, wait_until="domcontentloaded")
+                    await asyncio.sleep(random.uniform(0.8, 1.4))
+                except Exception as error:
+                    log(f"Карточка не открылась: {error}")
+                    continue
+                if not await guard(page, stop, f"Капча на {item['sku']}."):
+                    return rows
+                await open_offers(page)
+                offers = await offers_from_page(page, item["sku"], item["url"])
+                if not offers:
+                    offers = [{
+                        "Артикул": item["sku"], "Номер": 1, "Бренд": item["brand"], "Код_детали": item["sku"],
+                        "Описание": item["name"], "Наличие": "", "Цена": None, "URL": item["url"],
+                    }]
+                rows.extend(offers)
+                seen.add(item["url"])
+                log(f"предложений {len(offers)}")
+            continue
+        for index in range(count):
             if stop.is_set() or not await honor_pause(page, stop):
                 return rows
-            if item["url"] in seen:
-                continue
-            log(f"Открываю карточку {item['sku']}")
+            button = page.locator("a:has-text('Цены и аналоги')").nth(index)
             try:
-                await page.goto(item["url"], timeout=90000, wait_until="domcontentloaded")
+                href = await button.get_attribute("href") or ""
+                if href.startswith("/"):
+                    href = "https://partsmanager.ru" + href
+                sku = href.rstrip("/").split("/")[-1] or f"card-{index + 1}"
+                if href and href in seen:
+                    continue
+                log(f"Открываю карточку {sku}")
+                if href:
+                    await page.goto(href, timeout=90000, wait_until="domcontentloaded")
+                else:
+                    await button.click()
+                    await page.wait_for_timeout(1200)
                 await asyncio.sleep(random.uniform(0.8, 1.4))
             except Exception as error:
                 log(f"Карточка не открылась: {error}")
                 continue
-            if not await guard(page, stop, f"Капча на {item['sku']}."):
+            if not await guard(page, stop, f"Капча на {sku}."):
                 return rows
             await open_offers(page)
-            offers = await offers_from_page(page, item["sku"], item["url"])
+            offers = await offers_from_page(page, sku, page.url)
             if not offers:
                 offers = [{
-                    "Артикул": item["sku"], "Номер": 1, "Бренд": item["brand"], "Код_детали": item["sku"],
-                    "Описание": item["name"], "Наличие": "", "Цена": None, "URL": item["url"],
+                    "Артикул": sku, "Номер": 1, "Бренд": catalog["name"], "Код_детали": sku,
+                    "Описание": "", "Наличие": "", "Цена": None, "URL": page.url,
                 }]
             rows.extend(offers)
-            seen.add(item["url"])
+            if href:
+                seen.add(href)
             log(f"предложений {len(offers)}")
-        await asyncio.sleep(random.uniform(0.8, 1.4))
+            await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+            await asyncio.sleep(0.6)
+        await asyncio.sleep(random.uniform(0.4, 0.8))
     return rows
 
 
@@ -433,9 +473,11 @@ async def main() -> None:
         if flag.exists():
             flag.unlink()
     progress_path = out.with_name("progress.json")
-    saved = json.loads(progress_path.read_text(encoding="utf-8")) if progress_path.is_file() else {}
-    by_brand = saved.get("rows", {})
-    seen = set(saved.get("seen", []))
+    if progress_path.is_file():
+        progress_path.unlink()
+        log("Старый прогресс сброшен, собираю заново")
+    by_brand = {}
+    seen = set()
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
