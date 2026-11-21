@@ -23,9 +23,11 @@ CHROME = "/opt/pw-browsers/chromium_headless_shell-1248/chrome-headless-shell-li
 HOME = "https://partsmanager.ru/"
 STEP = 100
 COLUMNS = ["Артикул", "Номер", "Бренд", "Код_детали", "Описание", "Наличие", "Цена", "URL"]
-KNOWN = {
-    "ALLBEST": "https://partsmanager.ru/mycatalog/john-deere-allbest/john-deere-allbest?start={}",
-}
+KNOWN = [
+    {"name": "ALLBEST", "url": "https://partsmanager.ru/mycatalog/john-deere-allbest/john-deere-allbest?start={}"},
+    {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/john-deere-pmpro/john-deere-pmpro?start={}"},
+    {"name": "PMPRO", "url": "https://partsmanager.ru/mycatalog/pm-pro/pm-pro?start={}"},
+]
 LOG_FILE: Path | None = None
 CONTINUE: Path | None = None
 PAUSE: Path | None = None
@@ -124,9 +126,9 @@ async def guard(page, stop, reason: str) -> bool:
 
 
 async def discover_catalogs(page) -> list[dict]:
-    found = dict(KNOWN)
+    found = list(KNOWN)
     links = await page.evaluate(
-        """() => Array.from(document.querySelectorAll("a[href]")).map((link) => ({
+        """() => Array.from(document.querySelectorAll("a[href*='mycatalog']")).map((link) => ({
             href: link.href,
             text: (link.textContent || "").replace(/\\s+/g, " ").trim()
         }))"""
@@ -135,23 +137,22 @@ async def discover_catalogs(page) -> list[dict]:
         href = (link.get("href") or "").split("?")[0].rstrip("/")
         text = (link.get("text") or "").lower()
         low = href.lower()
-        if "john" not in low and "john" not in text and "deere" not in low and "дир" not in text:
-            if "allbest" not in low and "pmpro" not in low and "pm-pro" not in low:
-                continue
         key = brand_key(href + " " + text)
-        if not key or "mycatalog" not in low and "/parts/" not in low:
+        if not key:
             continue
-        if "mycatalog" in low:
-            found[key] = href + "?start={}"
-    catalogs = [{"name": name, "url": url} for name, url in found.items()]
-    if "PMPRO" not in found:
-        log("Каталог PM PRO по ссылке не нашёл. Если он в другом адресе — скажи его.")
-    return catalogs
+        found.append({"name": key, "url": href + "?start={}"})
+    unique, seen = [], set()
+    for item in found:
+        if item["url"] in seen:
+            continue
+        seen.add(item["url"])
+        unique.append(item)
+    return unique
 
 
-async def catalog_items(page) -> list[dict]:
+async def catalog_items(page, catalog_name: str) -> list[dict]:
     raw = await page.evaluate(
-        """() => Array.from(document.querySelectorAll("li.item")).map((card) => {
+        """() => Array.from(document.querySelectorAll("li.item, .catalog-item, .product-item")).map((card) => {
             const value = (selector) => {
                 const node = card.querySelector(selector);
                 return node ? (node.value || node.textContent || "").trim() : "";
@@ -161,6 +162,7 @@ async def catalog_items(page) -> list[dict]:
                 sku: value("input[name='number']") || value(".articleDesc a"),
                 brand: value("input[name='brand']"),
                 name: value(".articleDesc a, .articleDesc"),
+                text: (card.innerText || "").replace(/\\s+/g, " ").trim(),
                 href: link ? link.href || link.getAttribute("href") || "" : ""
             };
         })"""
@@ -170,10 +172,11 @@ async def catalog_items(page) -> list[dict]:
         href = card.get("href") or ""
         if href.startswith("/"):
             href = "https://partsmanager.ru" + href
-        brand = brand_key(card.get("brand") or "")
-        if not card.get("sku") or not href or not brand:
+        if not href or "/parts/" not in href:
             continue
-        items.append({"sku": card["sku"], "brand": brand, "name": re.sub(r"\s+", " ", card.get("name") or "").strip(), "url": href})
+        brand = brand_key(" ".join([card.get("brand") or "", href, card.get("name") or "", card.get("text") or ""])) or catalog_name
+        sku = card.get("sku") or href.rstrip("/").split("/")[-1]
+        items.append({"sku": sku, "brand": brand, "name": re.sub(r"\s+", " ", card.get("name") or "").strip(), "url": href})
     return items
 
 
@@ -281,10 +284,10 @@ async def scrape_catalog(page, catalog: dict, limit: int | None, seen: set[str],
         except PlaywrightTimeout:
             log(f"{catalog['name']}: карточек больше нет")
             break
-        items = await catalog_items(page)
-        items = [item for item in items if item["brand"] == catalog["name"] or catalog["name"] == "ALLBEST"]
-        log(f"{catalog['name']}: карточек {len(items)}")
+        items = await catalog_items(page, catalog["name"])
+        log(f"{catalog['name']}: карточек {len(items)} на {page.url}")
         if not items:
+            log(f"{catalog['name']}: на этой странице карточек нет, дальше не иду")
             break
         for item in items:
             if stop.is_set() or not await honor_pause(page, stop):
