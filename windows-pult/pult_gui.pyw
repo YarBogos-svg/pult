@@ -18,7 +18,7 @@ RESULTS = ROOT / "results"
 ICON = ROOT / "pult.ico"
 VERSION_PATH = ROOT / "version.txt"
 UPDATE_BASE = "https://raw.githubusercontent.com/YarBogos-svg/pult/main"
-UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "parsers/agriparts.py", "parsers/articles.xlsx", "requirements.txt")
+UPDATE_FILES = ("pult_gui.pyw", "parsers/gng.py", "parsers/partsagro.py", "parsers/partsmanager.py", "parsers/agriparts.py", "parsers/grenar.py", "parsers/articles.xlsx", "requirements.txt")
 JOBS = {
     "gng": {
         "label": "G&G",
@@ -47,6 +47,13 @@ JOBS = {
         "script": ROOT / "parsers" / "agriparts.py",
         "dir": RESULTS / "agriparts",
         "file": "agriparts.xlsx",
+    },
+    "grenar": {
+        "label": "Grenar",
+        "site": "John Deere · grenar.ru",
+        "script": ROOT / "parsers" / "grenar.py",
+        "dir": RESULTS / "grenar",
+        "file": "grenar.xlsx",
     },
 }
 
