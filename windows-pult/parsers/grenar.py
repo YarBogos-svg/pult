@@ -75,18 +75,37 @@ async def page_text(page) -> str:
 
 
 async def is_challenge(page) -> bool:
+    try:
+        visible = await page.evaluate(
+            """() => {
+                const selectors = [
+                    "#captcha", ".captcha", "img[src*='captcha']",
+                    "input[name*='captcha']",
+                    "iframe[src*='recaptcha']", "iframe[src*='hcaptcha']",
+                    "iframe[src*='turnstile']", "iframe[src*='captcha']"
+                ];
+                return selectors.some((selector) =>
+                    Array.from(document.querySelectorAll(selector)).some((node) => {
+                        const style = getComputedStyle(node);
+                        const box = node.getBoundingClientRect();
+                        return style.display !== "none" && style.visibility !== "hidden" && box.width > 40 && box.height > 40;
+                    })
+                );
+            }"""
+        )
+    except Exception:
+        visible = False
+    if visible:
+        return True
+    # дополнительная проверка текста только если нет карточек товаров
+    try:
+        has_cards = await page.locator("article.product-card").count()
+        if has_cards:
+            return False
+    except Exception:
+        pass
     html = await page_text(page)
-    if not html:
-        return False
-    markers = (
-        "captcha",
-        "recaptcha",
-        "hcaptcha",
-        "я не робот",
-        "подтвердите, что вы не робот",
-        "проверка безопасности",
-        "капча",
-    )
+    markers = ("я не робот", "подтвердите, что вы не робот", "проверка безопасности")
     return any(marker in html for marker in markers)
 
 
@@ -159,7 +178,7 @@ async def try_login(page, login: str, password: str, stop) -> None:
                 return
         if stop.is_set():
             return
-        await wait_user(page, stop, "Пауза после входа в кабинет.")
+        # пауза после входа больше не принудительная
     except Exception as error:
         if stop.is_set() or "has been closed" in str(error):
             log("Остановка по запросу")
