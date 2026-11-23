@@ -247,18 +247,31 @@ async def scrape_page(page, page_num: int, stop) -> tuple[str, list[dict]]:
         return "stopped", []
     raw = await page.evaluate(
         """() => Array.from(document.querySelectorAll("article.product-card")).map((card) => {
-            const link = card.querySelector("a.product-card__media-link");
-            const article = (card.querySelector(".product-card__article, [class*='article']") || {}).innerText || "";
-            const name = (card.querySelector(".product-card__title, [class*='title']") || {}).innerText || "";
-            const text = (card.innerText || "").replace(/\\s+/g, " ").trim();
-            const href = link ? link.getAttribute("href") || "" : "";
-            const code = href.split("/product/")[-1].replace(/\\/$/, "") || "";
-            return {
-                article: article.trim(),
-                name: name.trim(),
-                code,
-                text
-            };
+            try {
+                const link = card.querySelector("a.product-card__media-link, a[href*='/product/']");
+                const articleEl = card.querySelector(".product-card__article, [class*='article']");
+                const nameEl = card.querySelector(".product-card__title, [class*='title']");
+                const article = (articleEl && articleEl.innerText) ? articleEl.innerText : "";
+                const name = (nameEl && nameEl.innerText) ? nameEl.innerText : "";
+                const rawText = card.innerText || "";
+                const text = rawText.replace(/\s+/g, " ").trim();
+                let href = "";
+                if (link) {
+                    href = link.getAttribute("href") || link.href || "";
+                }
+                let code = "";
+                if (href && href.indexOf("/product/") !== -1) {
+                    code = href.split("/product/").pop().split("/")[0].split("?")[0];
+                }
+                return {
+                    article: (article || "").trim(),
+                    name: (name || "").trim(),
+                    code: code || "",
+                    text: text || ""
+                };
+            } catch (e) {
+                return { article: "", name: "", code: "", text: "" };
+            }
         })"""
     )
     items = []
